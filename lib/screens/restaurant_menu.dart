@@ -45,37 +45,88 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
     });
   }
   void _placeOrder() async {
-    var orderData = {
-      'customerName': widget.customerName,
-      'tableNumber': widget.tableNumber,
-      'items': order.entries.map((entry) => {
+    final ordersCollection = FirebaseFirestore.instance.collection('Orders');
+
+    // Prepare new items from current order map
+    List<Map<String, dynamic>> newItems = order.entries.map((entry) {
+      return {
         'name': entry.key,
         'quantity': entry.value['quantity'],
         'price': entry.value['price'],
-      }).toList(),
-      'status': 'Placed',
-      'timestamp': FieldValue.serverTimestamp(),
-      'paid': false,
-    };
+      };
+    }).toList();
 
-    var orderRef = await FirebaseFirestore.instance.collection('Orders').add(orderData);
+    // Check for existing unpaid order
+    final querySnapshot = await ordersCollection
+        .where('customerName', isEqualTo: widget.customerName)
+        .where('tableNumber', isEqualTo: widget.tableNumber)
+        .where('paid', isEqualTo: false)
+        .limit(1)
+        .get();
 
+    if (querySnapshot.docs.isNotEmpty) {
+      // Merge new items into existing order
+      final doc = querySnapshot.docs.first;
+      final existingItemsRaw = doc['items'] as List<dynamic>;
+      List<Map<String, dynamic>> existingItems =
+      existingItemsRaw.map((item) => Map<String, dynamic>.from(item)).toList();
+
+      for (var newItem in newItems) {
+        final index = existingItems.indexWhere((e) => e['name'] == newItem['name']);
+        if (index >= 0) {
+          existingItems[index]['quantity'] += newItem['quantity'];
+        } else {
+          existingItems.add(newItem);
+        }
+      }
+
+      // Update the existing order
+      await ordersCollection.doc(doc.id).update({'items': existingItems});
+
+      // Navigate to OrderStatusScreen
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => OrderStatusScreen(orderId: doc.id),
+        ),
+      );
+    } else {
+      // No existing order, create a new one
+      final orderRef = await ordersCollection.add({
+        'customerName': widget.customerName,
+        'tableNumber': widget.tableNumber,
+        'items': newItems,
+        'status': 'Preparing',
+        'paid': false,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => OrderStatusScreen(orderId: orderRef.id),
+        ),
+      );
+    }
+
+    // Clear the local order map
+    setState(() {
+      order.clear();
+    });
+  }
+
+
+  void _viewOrderHistory() {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => OrderStatusScreen(orderId: orderRef.id),
+        builder: (context) => OrderHistoryScreen(
+          customerName: widget.customerName,
+          tableNumber: widget.tableNumber,
+          orderHistory: [],
+        ),
       ),
     );
-  }
-
-  void _viewOrderHistory() {
-    // Navigate to order history screen
-    // Navigator.push(
-    //   context,
-    //   MaterialPageRoute(
-    //     builder: (context) => OrderHistoryScreen(customerName: widget.customerName, orderHistory: [],),
-    //   ),
-    // );
   }
 
 
@@ -140,18 +191,31 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
 
                 return PageView.builder(
                   controller: _pageController,
+                  physics: PageScrollPhysics(),   // smooth slide
+                  pageSnapping: true,             // snap on item
                   itemCount: menuItems.length,
                   itemBuilder: (context, index) {
                     var item = menuItems[index].data() as Map<String, dynamic>;
                     return Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Image.network(item['image'], height: 150, errorBuilder: (context, error, stackTrace) {
-                          return Icon(Icons.image_not_supported, size: 150);
-                        }),
-                        Text(item['name'], style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                        Image.network(
+                          item['image'],
+                          height: 150,
+                          errorBuilder: (context, error, stackTrace) {
+                            return Icon(Icons.image_not_supported, size: 150);
+                          },
+                        ),
+                        SizedBox(height: 10),
+                        Text(
+                          item['name'],
+                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                        ),
                         Text("₹${item['price']}"),
+                        SizedBox(height: 10),
                         ElevatedButton(
-                          onPressed: () => _addItemToOrder(item['name'], item['price']),
+                          onPressed: () =>
+                              _addItemToOrder(item['name'], item['price']),
                           child: Text("Add to Order"),
                         ),
                       ],
@@ -161,7 +225,6 @@ class _RestaurantMenuState extends State<RestaurantMenu> {
               },
             ),
           ),
-
           Expanded(
             child: ListView(
               children: order.entries.map((entry) {

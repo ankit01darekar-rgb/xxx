@@ -1,21 +1,24 @@
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        // Upgrade AGP
+        classpath "com.android.tools.build:gradle:8.9.1"
+
+        // Upgrade Kotlin plugin (compatible with AGP 8.9.x)
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.25"
+
+        // Google Services (for Firebase, keep as is)
+        classpath "com.google.gms:google-services:4.4.3"
+    }
+}
+
 allprojects {
     repositories {
         google()
         mavenCentral()
     }
-dependencies {
-    classpath 'com.google.gms.google-services:4.4.1'
-}
-}
-
-rootProject.buildDir = "../build"
-subprojects {
-    project.buildDir = "${rootProject.buildDir}/${project.name}"
-}
-subprojects {
-    project.evaluationDependsOn(":app")
-}
-
-tasks.register("clean", Delete) {
-    delete rootProject.buildDir
 }
